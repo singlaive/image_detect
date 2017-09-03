@@ -304,7 +304,7 @@ int main( int argc, char** argv )
     std::string output_path("./output.ppm");
     int opt ;
 
-    if (argc < 4)
+    if (argc < 2)
     {
         cout << "Too few arguments." << endl;
         exit(-1);

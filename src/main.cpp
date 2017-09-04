@@ -9,6 +9,9 @@
 using std::cout;
 using std::endl;
 
+// For RGB color, 3byte is used to describe color of a pixel.
+#define RGB_NUM_COLOR 3U
+
 static bool read_line(FILE *infile, char *s)
 {
   char *news, *sptr;
@@ -45,7 +48,7 @@ static bool read_ppm_image(const char * fileName, std::vector<unsigned char>& im
    result = (result && read_line(infile, s)); /*maxval = atoi(s);*/
    if(!result) return 0;
 
-   image.resize(width*height*3);
+   image.resize(width*height*RGB_NUM_COLOR);
    if(fread(&image[0], 3, height*width, infile ) != (size_t)(height*width))
       return false;
    
@@ -61,7 +64,7 @@ static bool write_ppm_image(const char* fileName, std::vector<unsigned char> con
       return false;
 
    fprintf(outfile, "P6\n#Constructed by Mirriad\n%d %d\n255\n", width, height);
-   fwrite(&image[0], 3, height*width, outfile);
+   fwrite(&image[0], RGB_NUM_COLOR, height*width, outfile);
    fclose(outfile);
    return true;
 }
@@ -164,13 +167,13 @@ private:
     {
         int match_merit = 0;
         // Calculate the start index in the RGB array for the given pixel.
-        auto offset = content.begin() + (point.second * target_width + point.first) * 3;
+        auto offset = content.begin() + (point.second * target_width + point.first) * RGB_NUM_COLOR;
 
         // Scan all pixels in the given area, calculate the root mean square error 
         for (int i = 0; i < tmplt_shape.rows; ++i)
         {
-            auto start = offset + target_width*3*i;
-            for (auto iter = start; iter != start+tmplt_shape.cols*3; iter+=3)
+            auto start = offset + target_width*RGB_NUM_COLOR*i;
+            for (auto iter = start; iter != start+tmplt_shape.cols*RGB_NUM_COLOR; iter+=RGB_NUM_COLOR)
             {
                 int v = sqaure_sum(int(*iter), int(*(iter+1)), int(*(iter+2)), 255, 0, 0);
                 match_merit += v;
@@ -195,7 +198,7 @@ class image_detector_CV: public image_detector_base
 public:
     image_detector_CV(const std::string &template_image_path = "", int method=0): tmplt_path(template_image_path), match_method(method)
     {
-        templt = cv::imread(template_image_path, 1);
+        templt = cv::imread(template_image_path, CV_LOAD_IMAGE_COLOR);
     }
 
     rectangular* detect(std::string target_image_path)
@@ -207,7 +210,7 @@ public:
         rectangular* p_match = 0;
         int result_cols, result_rows;
 
-        img = cv::imread(target_image_path);
+        img = cv::imread(target_image_path, CV_LOAD_IMAGE_COLOR);
         result_cols =  img.cols - templt.cols + 1;
         result_rows = img.rows - templt.rows + 1;
         match_result.create(result_rows, result_cols, CV_32FC1);
@@ -269,11 +272,12 @@ public:
 
         std::pair<int, int> point;
 
+        // Line by line, copy the color value of each pixel of the overlay image to the source image.
         for (int i = 0; i < overlay_height; ++i)
         {
-            int overlay_offset = overlay_width * i * 3;
-            int content_offset = ((rect.y + i ) * width + rect.x) * 3;
-            std::copy(overlay_content.begin()+overlay_offset, overlay_content.begin()+overlay_offset+overlay_width*3, content.begin()+content_offset);
+            int overlay_offset = overlay_width * i * RGB_NUM_COLOR;
+            int content_offset = ((rect.y + i ) * width + rect.x) * RGB_NUM_COLOR;
+            std::copy(overlay_content.begin()+overlay_offset, overlay_content.begin()+overlay_offset+overlay_width*RGB_NUM_COLOR, content.begin()+content_offset);
         }
 
         return *this;
@@ -296,14 +300,14 @@ class image_render_CV: public image_render_base
 public:
     image_render_CV(std::string& image_path): image_render_base(image_path)
     {
-        img = cv::imread(image_path);
+        img = cv::imread(image_path, CV_LOAD_IMAGE_COLOR);
     }
 
     image_render_base& set_overlay_rect(rectangular& rect, std::string& overlay_path)
     {
-        cv::Mat img_overlay = cv::imread(overlay_path);
+        cv::Mat img_overlay = cv::imread(overlay_path, CV_LOAD_IMAGE_COLOR);
 
-        img_overlay.copyTo(img(cv::Rect(rect.x,rect.y,rect.cols,rect.rows)));
+        img_overlay.copyTo(img(cv::Rect(rect.cols,rect.rows, rect.x,rect.y)));
         return *this;
     }
 

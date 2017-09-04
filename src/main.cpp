@@ -67,32 +67,19 @@ static bool write_ppm_image(const char* fileName, std::vector<unsigned char> con
 }
 
 #define sq(x) ((x)*(x))
-#define diff(a1,a2,a3,b1,b2,b3) \
+#define sqaure_sum(a1,a2,a3,b1,b2,b3) \
     sqrt(sq(a1-b1)+sq(a2-b2)+sq(a3-b3))
 
-static int match_norm(std::vector<unsigned char>::iterator begin, int length_pixal)
-{
-    int match_merit = 0;
-    std::vector<unsigned char>::iterator offset = begin;
-
-    for (int i = 0; i < length_pixal; ++i)
-    {
-        std::vector<unsigned char>::iterator start = offset + 750*i;
-
-        for (std::vector<unsigned char>::iterator iter = start; iter != start+length_pixal*3; iter+=3)
-        {
-            cout << int(*iter) << "," << int(*(iter+1)) << "," << int(*(iter+2)) << " ";
-            int v = diff(int(*iter), int(*(iter+1)), int(*(iter+2)), 255, 0, 0);
-            cout << v << endl;
-            match_merit += v;
-        }
-    }
-    match_merit = match_merit/length_pixal/length_pixal;
-    return match_merit;
-}
-
+/**
+  * @brief Base class for shapes.
+**/
 class shape_base {};
 
+/**
+  * @brief A rectangle class. 
+  *   It must have the size of two dimentions. 
+  *   The coordinates of the left top vertice and filled colour is optional.
+**/
 class rectangular: public shape_base
 {
 public:
@@ -112,66 +99,97 @@ public:
     int blue_fill;
 };
 
+/**
+  * @brief Base class for image detectors.
+**/
 class image_detector_base
 {
 public:
     virtual rectangular* detect(std::string target_image_path) {}
 };
 
+/**
+  * @brief This class utilises algrithm called similarity to detect whether a match of
+  *   a given shape exists in a target image. The algrithm is straight forward: it calculates
+  *   root mean square error of the color of all pixels in the target image to the given template shape.
+  *   If there is a perfect match, i.e. an identcal shape, presented in the target image, the root mean
+  *   square error of that area will be 0. For any other area of the target image, the root mean square
+  *   error will be a positive value in (0, 255]. The colour code here uses RGB. The same 
+  *   idea applies to other colour standards.
+**/
 class image_detector_similarity: public image_detector_base
 {
 public:
     image_detector_similarity(rectangular& template_shape): tmplt_shape(template_shape) {}
     rectangular* detect(const std::string target_image_path)
     {
-        int width, height;
+        
         rectangular *p_match = 0;
-
-        (void)read_ppm_image(target_image_path.c_str(), content, width, height);
         std::pair<int, int> point;
-
         std::vector<int> matches;
-        for (int i = 0; i < height-tmplt_shape.cols; ++i)
+
+        (void)read_ppm_image(target_image_path.c_str(), content, target_width, target_height);
+
+        // Iterate through all pixels in the target image with assumption that the match to 
+        // the template does not cross image boundaries.
+        for (int i = 0; i < target_height-tmplt_shape.cols; ++i)
         {
-            for (int j = 0; j < width-tmplt_shape.rows; ++j)
+            for (int j = 0; j < target_width-tmplt_shape.rows; ++j)
             {
                 point.first = j;
                 point.second = i;
-                matches.push_back(match_norm(point, tmplt_shape.cols, tmplt_shape.rows));
+                // Build a vector with results how matching an area in the target image to the
+                // template. The area is defined as a rectangle same size with the template
+                // starting from its left top vertice.
+                matches.push_back(match_norm(point));
             }
         }
 
-        auto smallest = std::min_element(matches.begin(), matches.end());  
-        std::cout << "min element is " << *smallest << " at position " << std::distance(matches.begin(), smallest) << std::endl;  
+        // Find out the min of the matching results and where it is.
+        auto smallest = std::min_element(matches.begin(), matches.end());
+        auto offset = std::distance(matches.begin(), smallest);
+        std::cout << "min element is " << *smallest << " at position " << offset << std::endl;  
 
-        int y = std::distance(matches.begin(), smallest)/(width-tmplt_shape.rows);
-        int x = std::distance(matches.begin(), smallest) % (width-tmplt_shape.rows);
+        // Find out the pixal coordinates which leads the matching area.
+        int y = offset / (target_width-tmplt_shape.rows);
+        int x = offset % (target_width-tmplt_shape.rows);
         cout << "coordinate: " << x << " " << y << endl;
+
+        // Return the wrapped matching area as a rectangle.
         p_match = new rectangular(tmplt_shape.rows, tmplt_shape.cols, x, y);
         return p_match;
     }
 private:
-    int match_norm(std::pair<int,int>& point, int colms, int rows)
+    int match_norm(std::pair<int,int>& point)
     {
         int match_merit = 0;
-        std::vector<unsigned char>::iterator offset = content.begin()+point.second*750+point.first*3;
+        // Calculate the start index in the RGB array for the given pixel.
+        auto offset = content.begin() + (point.second * target_width + point.first) * 3;
 
-        for (int i = 0; i < rows; ++i)
+        // Scan all pixels in the given area, calculate the root mean square error 
+        for (int i = 0; i < tmplt_shape.rows; ++i)
         {
-            std::vector<unsigned char>::iterator start = offset + 750*i;
-            for (std::vector<unsigned char>::iterator iter = start; iter != start+colms*3; iter+=3)
+            auto start = offset + target_width*3*i;
+            for (auto iter = start; iter != start+tmplt_shape.cols*3; iter+=3)
             {
-                int v = diff(int(*iter), int(*(iter+1)), int(*(iter+2)), 255, 0, 0);
+                int v = sqaure_sum(int(*iter), int(*(iter+1)), int(*(iter+2)), 255, 0, 0);
                 match_merit += v;
             }
         }
-        match_merit = match_merit/colms/rows;
+        match_merit = sqrt(match_merit/tmplt_shape.cols/tmplt_shape.rows);
         return match_merit;
     }
+
     rectangular& tmplt_shape;
     std::vector<unsigned char> content;
+    int target_width, target_height;
 };
 
+/**
+  * @brief This class ustilise the buildin method in open source library OpenCV for image
+  *   detection. Multiple algrithms are available: CV_TM_SQDIFF, CV_TM_CCORR, CV_TM_CCOEFF
+  *   and their normalised version. 
+**/
 class image_detector_CV: public image_detector_base
 {
 public:
@@ -194,13 +212,14 @@ public:
         result_rows = img.rows - templt.rows + 1;
         match_result.create(result_rows, result_cols, CV_32FC1);
 
-        cv::matchTemplate(img, templt, match_result, CV_TM_SQDIFF);
+        cv::matchTemplate(img, templt, match_result, match_method);
         cv::normalize(match_result, match_result, 0, 1, cv::NORM_MINMAX, -1, cv::Mat());
 
         cv::minMaxLoc(match_result, &minVal, &maxVal, &minLoc, &maxLoc, cv::Mat());
 
         if (minVal != maxVal)
         {
+            // For CV_TM_SQDIFF, the min value is the matching point. It is different for other algrithms.
             matchLoc = minLoc;
             p_match = new rectangular(matchLoc.x, matchLoc.y, templt.rows, templt.cols);
         }
@@ -214,6 +233,10 @@ private:
     int match_method;
 };
 
+/**
+  * @brief Base class for image render. So far it only does one thing, put an overlay image on top
+  *   of source image at given location.
+**/
 class image_render_base
 {
 public:
@@ -225,6 +248,9 @@ protected:
     std::string path_image_out;
 };
 
+/**
+  * @brief The render of similarity algrithm version. 
+**/
 class image_render_similarity: public image_render_base
 {
 public:
@@ -262,6 +288,9 @@ private:
     int width, height;
 };
 
+/**
+  * @brief The render of OpenCV version. OpenCV library uses buildin methods for applying overlay and exporting.
+**/
 class image_render_CV: public image_render_base
 {
 public:
@@ -285,7 +314,8 @@ public:
 private:
     cv::Mat img;
 };
-extern char *optarg;
+
+// extern char *optarg;
 static void display_help(void)
 {
     cout << "Usage: imageDetect -r path/to/replacement/image [-t path/to/template/iamge] [-o path/to/output/image] path/to/target/image" << endl;
@@ -301,8 +331,8 @@ int main( int argc, char** argv )
     const char *optString = "o:t:r:h";
     rectangular *p_match = 0;
     std::string overlay_path, tmplt_path, target_path;
-    std::string output_path("./output.ppm");
-    int opt ;
+    std::string output_path("./output.ppm"); // Default path of the output image.
+    int opt;
 
     if (argc < 2)
     {
@@ -310,6 +340,7 @@ int main( int argc, char** argv )
         exit(-1);
     }
 
+    // Parse arguments from command line.
     while ((opt = getopt( argc, argv, optString))!= -1)
     {
         switch (opt)
@@ -331,9 +362,12 @@ int main( int argc, char** argv )
                 break;  
         }
     }
-     if (optind >= argc) {
+
+    if (optind >= argc) {
         cout << "error" << endl;
     }
+
+    // This is the path to image we run detection against.
     target_path = argv[optind];
 
     if (overlay_path.empty() || target_path.empty())
@@ -345,21 +379,28 @@ int main( int argc, char** argv )
     image_detector_base *p_detector = 0;
     image_render_base *p_render = 0;
 
+    // Without presence of external template image, initialize 'similarity' algrithm with
+    // coloured shape as a template.
     if (tmplt_path.empty())
     {
+        // Here we generate a retanglar in red as template.
         int col = 50;
         int row = 50;
         rectangular rec(col, row);
         rec.fillRGB(255, 0, 0);
+
         p_detector = new image_detector_similarity(rec);
         p_render = new image_render_similarity(target_path);
     }
+    // Alternately, initialize CV_TM_SQDIFF algrithm with provided template image.
     else
     {
         p_detector = new image_detector_CV(tmplt_path, CV_TM_SQDIFF);
         p_render = new image_render_CV(target_path);
     }
 
+    // Run the associated detection algrithm. If a match is located, replace it with
+    // given overlay image before exporting the result as a new image.
     p_match = p_detector->detect(target_path);
     if (0 != p_match)
     {

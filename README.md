@@ -1,6 +1,6 @@
 This repo provides an example for image detection and replacement with C++.
 
-It builds two mechanism internally for image detection: using openCV library and manually calculating the mean square error based on RGB colour.
+It builds two mechanism internally for image detection: using openCV library and manually calculating the root mean square error based on RGB colour.
 * For approach using openCV, a template image is used.
 * For the manual approach, a predefined square with filled colour is provided in the code as a template
 
